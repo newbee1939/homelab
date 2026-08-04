@@ -1,0 +1,17 @@
+- 自宅サーバー
+    - Raspberry Pi
+        - Kubernetes
+        - おうちKubernetes
+- 電子工作
+- 電気ガスの料金を減らしたい
+    - 自家発電
+    - 太陽光発電（ソーラーパネル）
+    - 蓄電池
+- Team Tracker
+- リポジトリ名をhomelabにしてもいいかも
+- 自宅サーバーに入門してみた
+    - https://zenn.dev/sonicmoov/articles/246c02cb2857d0
+- iCloudに金を払わないでいいように自前で管理したい
+- Pi Holeで広告の整備
+- 再:自宅サーバーを始めてみよう! 2020-8-29 B-1
+    - https://www.youtube.com/watch?v=XC904l9TV6Y
