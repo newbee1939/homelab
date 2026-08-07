@@ -33,7 +33,7 @@
 | 1 | 同上 | Ansible ですべてコード化、Docker で初サービス | 2〜4 週 |
 | 2 | ミニ PC を 1 台購入 | Proxmox + Terraform、監視、24/365 稼働へ移行 | 1〜2 か月 |
 | 3 | 同上 + Zigbee ドングル | Home Assistant 本格導入 | 継続 |
-| 4 | Raspberry Pi / NAS など | ネットワーク・ストレージ・脱クラウド | 気が向いたら |
+| 4 | Raspberry Pi / NAS など | ネットワーク・ストレージ・脱クラウド・ローカル LLM | 気が向いたら |
 | 5 | スマートメーター / 太陽光 | 電気・ガス代を下げる | データが溜まってから |
 
 ---
@@ -117,6 +117,7 @@
 7. **名前でアクセスできるようにする** — 内部ドメイン（`*.lab.home` など）を Pi-hole の DNS に登録し、**Caddy** をリバースプロキシに置く
    - Let's Encrypt の **DNS-01 チャレンジ**なら、外部公開せずに内部サービスも HTTPS にできる（ドメインは必要）
    - 「IP とポート番号を覚える」状態から抜けると、生活の質が一段上がる
+   - ⚠️ DNS-01 は**ドメインの DNS レコードを API で書き換える**方式。ここでドメインと DNS プロバイダを持つことになるので、**同じ `terraform/` でクラウド側も管理し始める**（→「クラウドも同じリポジトリで管理する」）
 8. **監視を入れる**（SRE の本業。ここは手を抜かない）
    - **Prometheus + Grafana + node_exporter** … CPU / メモリ / ディスク / 温度 / 電力を時系列で見る
    - `smartctl_exporter` で SSD の書き込み量と健康状態を見る（**壊れる前に気づく**ための唯一の手段）
@@ -201,6 +202,44 @@ J リーグは ESPN API のカバー範囲次第なので、**まず対象リー
 - **Frigate**（玄関カメラ + 物体検知）— 便利だが CPU / 電力を食う。ミニ PC 1 台では重い。**やるなら最後**
 - **ntfy** — バックアップ成功 / 洗濯終了 / 宅配到着をスマホへ。地味に一番使う
 
+### ローカル LLM（期待値を先に下げてから始める）
+
+**目的は「ChatGPT を自宅に置く」ことではない。** それは性能でもコストでも勝てない。狙いは 2 つだけ。
+
+1. **プロンプトを外に出さない**（家の中のデータ、HA のエンティティ名、家族の会話）
+2. **LLM が動く仕組みを一段下まで理解する**（量子化、KV キャッシュ、メモリ帯域がボトルネックであること）
+
+#### 現実的な構成
+
+- **Ollama**（モデルの実行）+ **Open WebUI**（ブラウザの UI）を Docker で。どちらも無料
+- **N150 / N355 の CPU 推論で動くのは 3B〜8B 級を 4bit 量子化したものまで**。体感は「数 token/秒」= 読むより遅い。要約や分類のような**待てる仕事**なら実用になる
+- 対話の速度が欲しくなったら GPU が要る。**そこで homelab の前提（8W・月 180 円）が崩れる**ことを先に理解しておく
+
+> **量子化とは**: モデルの重み（数値の塊）を 16bit → 4bit に丸めて、サイズを 1/4 にすること。精度は少し落ちるが、**RAM に載る**ようになる。載らなければディスクを読みに行って 100 倍遅くなるので、載せることが最優先。
+
+#### 消費電力の現実（ここが判断の要）
+
+| 構成 | 実行できるモデル | アイドル | 推論中 | 年間電気代の増分 |
+|---|---|---|---|---|
+| N150 ミニ PC の CPU のみ | 3B〜8B（4bit）・数 token/秒 | 7〜8W | 15〜20W | ほぼゼロ（使う時だけ） |
+| 中古 GPU（RTX 3060 12GB 等）を積む | 14B 級まで快適 | +15〜25W（**挿すだけで常時**） | 150W〜 | **+5,000〜8,000 円** |
+
+**アイドルで常時食う分が効く。** 「収支を黒字にする」という目標（→ コスト）を、GPU 1 枚が単独で吹き飛ばす。
+やるなら「学ぶため」と割り切るか、**普段は電源を切っておき、使う時だけ起動する**設計にする。
+
+#### Home Assistant と繋ぐ（ここが homelab らしい出口）
+
+HA には公式の **Ollama 統合**があり、ローカル LLM を conversation agent にできる。Assist（音声）と組めば、**声も文章も一切クラウドに出ない**アシスタントになる。
+
+- ⚠️ 実際に家電を操作させるには **tool 呼び出しに対応したモデル**が必要。小さいモデルほど誤操作する
+- 公式ドキュメントは**公開エンティティを 25 個未満に絞る**ことを推奨している。全部を渡すと精度が落ちる
+- 最初は「操作させない・雑談だけ」で始め、動きを見てから 1 つずつエンティティを公開する（原則 6：家族が使うものを実験台にしない）
+
+#### Done の条件
+
+- `ollama run` ではなく、**Ansible / Compose で再構築できる**状態になっている
+- 「なぜこのモデルは動いてあのモデルは動かないのか」を、パラメータ数 × 量子化ビット数 ≒ 必要 RAM で説明できる
+
 ---
 
 ## Phase 5 — 電気・ガス代を下げる（データが溜まってから）
@@ -245,10 +284,48 @@ homelab の事故はほぼ全部「外に晒した」か「初期パスワード
 5. **バックアップは別の場所に置く** — ランサムウェアはネットワーク越しのバックアップも暗号化する。
    **月 1 回は外付け HDD を物理的に抜いておく**（オフライン copy）。これが 3-2-1 の「1」
 
+### 外から使う — Tailscale と Cloudflare Zero Trust の使い分け
+
+**原則 3（ポートを開けない）は変えない。** その上で、外から届かせる方法は 2 つあり、**用途が違う**。どちらも無料枠で足りる。
+
+| | Tailscale | Cloudflare Zero Trust（Tunnel + Access） |
+|---|---|---|
+| 仕組み | 端末同士を WireGuard で直結（P2P） | 家の中から Cloudflare へ**外向き**に常時接続し、その道を逆流させる |
+| 使う側の準備 | **アプリのインストールとログインが要る** | **ブラウザだけ**。URL を開くと認証画面が出る |
+| 通信の中身 | 端末間で暗号化。**Cloudflare も Tailscale も中を見られない** | Cloudflare が TLS を終端する = **平文が一度 Cloudflare を通る** |
+| ポート開放 | 不要 | 不要（接続は必ず内側から外へ張る） |
+| 無料枠 | Personal: 3 ユーザー / 100 デバイス | 50 ユーザーまで |
+| 向く用途 | **自分の端末から自分のサービス**（SSH、Proxmox 管理画面、Grafana） | **他人に URL を渡す**（家族、実家、友人に見せる Immich のアルバム） |
+
+**判断は 1 行で決まる — 「相手にアプリを入れさせられるか」。**
+入れさせられるなら Tailscale で十分で、それが一番安全（誰も中身を見られない）。入れさせられない相手に届けたいときだけ Cloudflare を使う。
+
+#### 導入するなら（Phase 2 以降）
+
+1. ドメインの DNS を Cloudflare に移す（Phase 2 の DNS-01 でどのみち必要になる）
+2. `cloudflared` を Docker で 1 個動かす。**ルータの設定は一切触らない**
+3. Cloudflare Access で「このメールアドレスだけ」というポリシーを作る。**Tunnel だけ張って Access を付けないのは、ただの全世界公開**。ここが最大の事故ポイント
+4. 管理画面（Proxmox / Grafana / Pi-hole）は**絶対に Tunnel に載せない**。載せるのは家族に見せるものだけ
+
+#### 副産物: Gateway（外出先の Pi-hole 代わり）
+
+Zero Trust には **Gateway**（DNS フィルタ）が付いてくる。WARP クライアントを入れたスマホは、**家の外でも広告ブロックが効く**。Pi-hole は家の中でしか効かないので、ここは素直に便利。
+
+- ⚠️ 無料枠には **1 シートあたり月 15 万クエリ**という目安がある。個人利用で超えることはまずないが、上限がゼロではないことは知っておく
+
+#### ⚠️ ここが homelab で一番怖い
+
+Cloudflare を挟むと、**自分のドメイン全体の鍵を 1 社に預ける**ことになる（DNS + 証明書 + 認証）。
+Tailscale だけの構成なら、Tailscale が落ちても家の中は動く。**Cloudflare に依存を寄せるほど、自分で直せない障害が増える**。
+
+- 家の中からのアクセスは、**Cloudflare を通さず内部 DNS で直接**引くようにしておく（そうしないと回線が切れた瞬間に家中の照明が操作できなくなる）
+- これは技術の問題ではなく、**依存の設計**の問題。原則 4（壊す前提）に照らして決める
+
 ### やらなくていいこと
 
 - 凝ったファイアウォールルール（`ufw` で必要なポートだけ開ければ十分）
 - WAF、多段プロキシ、証明書の相互認証。**Tailscale で外部から届かないなら、そこは攻撃面ではない**
+- Cloudflare Access を**自分専用**に使うこと（Tailscale で足りる。無駄に依存を増やすだけ）
 
 ---
 
@@ -346,29 +423,91 @@ Pi-hole のクエリログを Grafana に流す。**どの端末が、どのド�
 
 ---
 
-## ハードウェア選定（2026 年 7 月時点）
+## クラウドも同じリポジトリで管理する（フェーズ横断・Phase 2 から）
+
+**「自宅は Terraform、クラウドは管理画面でポチポチ」は原則 1（手で設定したら負け）を半分捨てている。**
+個人が使っているインフラは、自宅の外にも散らばっている — ドメイン、DNS、VPN の ACL、GitHub の設定。これを**同じ `terraform/` に集める**。
+
+### なぜやるか
+
+- **1 年後の自分は必ず忘れる。** 「この DNS レコード何のために作ったっけ」を消すのが目的
+- 個人インフラの**棚卸しになる**。使っていないドメイン・サービスが可視化され、**解約に繋がる**（→ 収支の目標）
+- 仕事で書く Terraform と違い、**壊しても誰も困らない**。state を壊す練習ができるのは個人環境だけ
+
+### 入れるもの（全部無料枠で完結する）
+
+| 対象 | プロバイダ | 管理するもの |
+|---|---|---|
+| **Proxmox** | `bpg/proxmox` | VM / LXC（Phase 2 で既に入れている） |
+| **Cloudflare** | `cloudflare/cloudflare` | DNS レコード、Tunnel、Access ポリシー |
+| **Tailscale** | `tailscale/tailscale` | ACL、tag、鍵の有効期限 |
+| **GitHub** | `integrations/github` | このリポジトリの設定、ブランチ保護、Renovate 用の設定 |
+
+### 入れないもの
+
+- **アカウントそのもの**（作成・課金情報）。Terraform で作れないし、作るべきでもない
+- **料金が発生するクラウドリソース**（VM、マネージド DB）。この homelab の目的は**クラウド代を減らすこと**であって増やすことではない。AWS/GCP を触りたいなら仕事か別リポジトリで
+- **一度きりの手続き**（ドメインの取得、B ルートの申請）。`docs/` に書けば十分
+
+### state をどこに置くか
+
+**最初はローカルで十分**（Phase 2 と同じ）。ただしクラウドを混ぜると state に API トークンが残るので、**`.gitignore` は最初に書く**。
+
+- `terraform.tfstate` を**絶対にコミットしない**。事故の 9 割はここ
+- 複数マシンから触りたくなったら、Cloudflare R2（S3 互換・無料枠あり）をバックエンドにする。**困ってからでいい**
+- 認証情報は環境変数か SOPS。**平文を Git に置かない**（原則）
+
+### 進め方（既存を壊さない順番）
+
+1. 既に手で作ってあるものを **`import` ブロック**で取り込む（HCL に書いてから `terraform plan` で差分ゼロを確認する）
+2. **差分ゼロになるまで HCL を実物に合わせる**。ここを飛ばして `apply` すると本番の DNS が消える
+3. 差分ゼロを確認できてから、以降の変更を Terraform 側だけで行う
+4. GitHub Actions で `terraform plan` を PR に出す（`apply` は手元で。個人リポジトリで自動 apply はやらなくていい）
+
+### ここで学ぶこと
+
+- **state とは何か** — 現実と HCL の間にある「前回こうだった」という記録でしかないこと
+- import / `moved` / `removed` ブロック（**実物を消さずに Terraform から外す**方法）
+- プロバイダ認証の仕組み（API トークンのスコープを最小にする練習ができる）
+- 宣言的管理の限界 — 「作れるが、消せない / 差分が出続ける」リソースに必ず出会う
+
+---
+
+## ハードウェア選定（2026 年 8 月時点）
 
 ### 結論
 
-**中古 1L ミニ PC（ThinkCentre Tiny 系）が第一候補。新品なら N150 より N350 を狙う。**
+**新品 N150 ミニ PC（16GB / 512GB）をセールで 2 万円前後で買う。これが最安かつ最短。**
+中古 1L ミニ PC は「分解して増設もしたい」なら。**Wildcat Lake は待たない・買わない。**
 
 | 候補 | 価格の目安 | アイドル電力 | 向き / 不向き |
 |---|---|---|---|
-| **中古 ThinkCentre M75q-1 / M720q / M920q Tiny** | 20,000〜25,000 円 | 8〜12W | ◎ RAM 64GB まで載る / 分解・増設しやすく**ハードの勉強に最適** / 企業向けで堅牢。△ 個体差あり |
-| **新品 N150 ミニ PC**（GMKtec G3 Plus, BMAX B1 Pro など） | 18,000〜25,000 円 | 7〜8W | ◎ 最安・最省電力・保証あり / RAM 16GB・SSD 込み。△ **4 コア**。RAM 上限が低い |
-| **新品 N350 / N355 ミニ PC** | 30,000〜40,000 円 | 8〜10W | ◎ **8 コア**で N150 比マルチコア +38%。TDP は 7W のまま。**VM を何個も立てるなら差が出る** |
-| **Minisforum MS-01 等の上位機** | 80,000 円〜 | 20W〜 | ◎ 10GbE・PCIe。今は不要。**買わない** |
+| **新品 N150 ミニ PC**（GMKtec G3 Plus, AOOSTAR N1 Pro, BMAX B1 Pro など） | **19,000〜25,000 円**（セールで 2 万円切りも） | 7〜8W | ◎ **最安・最省電力・保証あり**。RAM 16GB + SSD 512GB 込みで届いてすぐ動く。△ **4 コア**、メモリ上限 16GB の機種が多い |
+| **中古 ThinkCentre M75q-1 / M720q Tiny** | 20,000〜25,000 円 | 8〜12W | ◎ RAM 64GB まで載る / 分解・増設しやすく**ハードの勉強に最適** / 企業向けで堅牢。△ 個体差・AC アダプタ・埃 |
+| **新品 N350 / N355 ミニ PC**（8 コア） | 30,000〜40,000 円 | 8〜10W | ◎ N150 比でコア数が倍。TDP は 9〜15W 止まり。**VM を 5 個以上並べるなら差が出る**。△ 最初の 1 台には過剰 |
+| **Core 3 300 番台（Wildcat Lake）搭載機** | 60,000 円〜 | 10W〜 | ◎ 速い（下記）。△ **搭載機が 10GbE / Thunderbolt 4 付きの高価格帯から出ている**。homelab の 1 台目には高すぎる |
+| **Minisforum MS-01 等の上位機** | 80,000 円〜 | 20W〜 | 10GbE・PCIe。今は不要。**買わない** |
 | **Raspberry Pi 5** | 15,000 円〜（周辺込み） | 4〜7W | ◎ GPIO / 電子工作。△ ARM・I/O が弱くサーバー本命には不向き。**Phase 4 で買う** |
 
-### CPU 世代の現状（2026 年 7 月）
+### CPU 世代の現状（2026 年 8 月）
 
 - **N100 と N150 は実質同性能**（マルチコア差は約 1%）。**安い方を買えばいい**
-- 一段上が **N350 / N355（Twin Lake, 8 コア）**。同じ 7W TDP で**コア数が倍**。Proxmox で VM を並べるなら +1 万円の価値はある
-- 次世代 **Wildcat Lake** が控えているが、**待つ理由はない**。今の N シリーズで動くものは新世代でも同じことしかしない
+- 一段上が **N350 / N355（Twin Lake, 8 コア）**。E コアのみで TDP 9〜15W。Proxmox で VM を並べるなら +1 万円の価値はある
+- **Wildcat Lake（Core 3 300 番台）が 2026 年に登場した。** Intel 18A・2P+4LPE 構成で、Core 3 304 の PassMark は約 11,500 = **N150（約 5,400）の 2 倍**
+  - ただし **TDP は 15〜35W** で、N シリーズの「常時つけっぱなしでも月 180 円」という前提から外れる
+  - 搭載機（Beelink EQi など）は 10GbE / Thunderbolt 4 付きの構成から始まっており、**価格が一段上**
+  - **結論は変わらない — 待つ理由も買う理由もない。** Pi-hole と Home Assistant は N150 で余裕で動く
+
+### 安く買うコツ
+
+- **定価で買わない。** N150 機は Amazon のタイムセール / プライムデーで 1 万円近く落ちることがある。PC Watch などのセール記事を 2 週間眺めてから買う
+- **価格.com の最安値を鵜呑みにしない。** 上位に出るのは Windows 11 Pro 付きの法人向けで 4〜5 万円する。Proxmox を入れる以上 **Windows ライセンス代は捨て金**
+- **中古は「OS なし / Windows なし」を狙う**。同じ個体でも数千円安い
+- ベアボーン（RAM・SSD なし）+ 自分で載せる方が安いことがある。**かつ、それ自体がハードの勉強になる**（→ 原則）
 
 ### 判断基準（迷ったらこれ）
 
-- **RAM は 16GB 以上、できれば増設できる機種**。CPU よりメモリで詰まる
+- **RAM は 16GB 以上、できれば増設できる機種**。CPU よりメモリで詰まる。ローカル LLM をやるなら 32GB 欲しくなるので、**増設できるかは効いてくる**
 - **メモリがオンボード直付けでないか確認**（SO-DIMM スロットがあるか）。ここを外すと一生増設できない
 - **有線 LAN 必須**（できれば 2.5GbE）。Wi-Fi でサーバーを運用しない
 - **NVMe スロット + 2.5inch ベイ**があると後で困らない
@@ -394,14 +533,17 @@ Pi-hole のクエリログを Grafana に流す。**どの端末が、どのド�
 |---|---|
 | Proxmox VE / Ansible / Terraform / Docker / Home Assistant | 0 円 |
 | Tailscale Personal | 0 円 |
+| Cloudflare Zero Trust（50 ユーザーまで） | 0 円 |
+| Ollama / Open WebUI（ローカル LLM） | 0 円 |
 | GitHub（private repo / Actions） | 0 円 |
 | **電気代**（8W 24h・31 円/kWh 換算） | **約 180 円/月** |
-| 初期投資（ミニ PC） | 20,000 円前後 |
+| 初期投資（新品 N150 ミニ PC・16GB/512GB） | **20,000 円前後** |
 | Zigbee ドングル + センサー 1 個 | 5,000 円前後 |
 | ミラーポート対応スイッチ（TL-SG105E） | 3,000 円前後 |
 
 ドメインは Phase 2 の内部 HTTPS（DNS-01）で欲しくなる。**年 1,500 円程度**で、これだけは払う価値がある。
-不要なら HTTP のまま or 自己署名でも進められる。外部公開（Cloudflare Tunnel）は最後まで不要 — Tailscale で足りる。
+不要なら HTTP のまま or 自己署名でも進められる。
+外部公開（Cloudflare Tunnel）は**自分だけなら最後まで不要** — Tailscale で足りる。**他人に URL を渡す用が出てきてから**入れる（→ セキュリティ）。
 
 **回収できる支出**（Phase 4-5、やるなら）
 
@@ -431,6 +573,7 @@ Pi-hole のクエリログを Grafana に流す。**どの端末が、どのド�
 - `powertop --auto-tune` で C-state（CPU の省電力状態）を効かせる。数 W 変わることがある
 - **Frigate（カメラ物体検知）を入れない** — 常時 CPU を回すので消費電力が跳ねる
 - **k3s クラスタを 3 台で組まない** — 電気代がそのまま 3 倍になる。学習目的なら 1 台の中に VM を 3 つ立てれば足りる
+- **LLM 用の GPU を常時挿しておかない** — アイドルだけで +15〜25W。**ミニ PC 本体 3 台分**を、使っていない間もずっと食う
 - ワットチェッカーで**実測してから**削る。推測で削らない
 
 ここまでやると 6〜7W = **月 150 円**。ここが実質的な下限。
@@ -460,7 +603,7 @@ homelab/
 │   ├── site.yml
 │   └── roles/
 ├── compose/          # サービスごとの docker-compose.yml
-├── terraform/        # Phase 2 から
+├── terraform/        # Phase 2 から。自宅（Proxmox）とクラウド（Cloudflare / Tailscale / GitHub）を同居させる
 └── docs/             # 学習ログ・詰まった記録
 ```
 
@@ -481,6 +624,7 @@ homelab/
 | 仮想化 | Phase 2 | KVM, namespace / cgroup, virtio, ブリッジ |
 | ストレージ | Phase 4 | ZFS, RAID, SMART, 書き込み耐性(TBW) |
 | ハードウェア | Phase 2-5 | TDP と実消費電力, メモリ規格(SODIMM/DDR4/5), NVMe と SATA, 冷却 |
+| 推論の下回り | Phase 4 | 量子化, KV キャッシュ, メモリ帯域がボトルネックになる理由, CPU と GPU の使い分け |
 | 電気・電子 | Phase 4-5 | 電圧/電流/電力, GPIO, I2C, はんだ付け, 直流と交流 |
 | カーネル境界 | 道場でのみ | syscall, `strace`, eBPF, TCP ハンドシェイク, パケットの実物 |
 
@@ -575,6 +719,11 @@ homelab/
 - [Prometheus 公式ドキュメント](https://prometheus.io/docs/introduction/overview/) / [node_exporter](https://github.com/prometheus/node_exporter)
 - [ha-teamtracker（HACS カスタム統合）](https://github.com/vasqued2/ha-teamtracker)
 - [ntopng ドキュメント（公式）](https://www.ntop.org/guides/ntopng/) — Community Edition は GPLv3 で無料
+- [Cloudflare Zero Trust ドキュメント（公式）](https://developers.cloudflare.com/cloudflare-one/) / [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) — 無料枠は 50 ユーザーまで
+- [Ollama（公式）](https://docs.ollama.com/) / [Open WebUI（公式）](https://docs.openwebui.com/) — ローカル LLM
+- [Home Assistant Ollama 統合（公式）](https://www.home-assistant.io/integrations/ollama/) — ローカル LLM を conversation agent にする
+- [Cloudflare Terraform プロバイダ](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs) / [Tailscale プロバイダ](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs) / [GitHub プロバイダ](https://registry.terraform.io/providers/integrations/github/latest/docs)
+- [Terraform `import` ブロック（公式）](https://developer.hashicorp.com/terraform/language/import) — 手で作った既存リソースを取り込む
 - [Vaultwarden（公式 Wiki）](https://github.com/dani-garcia/vaultwarden/wiki) / [Paperless-ngx（公式）](https://docs.paperless-ngx.com/) / [Homepage（公式）](https://gethomepage.dev/)
 - [OPNsense ドキュメント（公式）](https://docs.opnsense.org/)
 
