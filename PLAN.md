@@ -90,14 +90,38 @@
 
 > **Phase 0-1 は 24 時間動かさなくていい。** 常時稼働は Phase 2 から。Windows は勝手に再起動し、うるさく、電気も食う。
 
+### 先に決める — マシンの役割分担
+
+**このリポジトリは Mac にだけ置く。Windows PC は「VM を動かす箱」に徹する。**
+理由は 1 つ — **Ansible は Windows を制御ノードとしてサポートしていない**（Python が動く Linux / macOS のみ）。
+
+```
+[ Mac ]  ← 制御ノード。コードを書く / git / ansible-playbook を叩く
+   │                                    リポジトリはここだけに置く
+   │  同じ LAN、SSH で入る
+   ▼
+[ Windows PC ]  ← 電源を入れて VM を起動するだけ。何も clone しない
+   └─ Hyper-V
+        └─ [ Ubuntu VM ]  例: 192.168.1.50  ← 操作される側
+                                              要るのは SSH と Python だけ
+```
+
+- **仮想スイッチを「外部」にするのはこのため。** VM が LAN 上に自分の IP を持つので Mac から直接届く。NAT にすると Windows を経由する羽目になり、この構図が崩れる
+- **Phase 2 でも構図は変わらない** — 宛先が「Windows 上の VM」から「ミニ PC の VM」に変わるだけ。書き換えるのは `inventory.yml` の IP 1 行
+- ⚠️ **Windows のスリープを無効化する。** Windows が寝ると中の VM も止まり、Mac から届かなくなる
+- ❌ **VM の中に clone して自分自身に Ansible をかける形は取らない。** 作り直すたびに clone と鍵からやり直しになり、**Phase 2 で複数ホストになった瞬間に破綻する**
+
 ### やること
 
+- [ ] **Mac に Ansible を入れる**（`brew install ansible`）
 - [ ] `winver` で Windows のエディションを確認する
   - [ ] **Pro / Enterprise** → Hyper-V を有効化。仮想スイッチは「外部」（VM が LAN 上に自分の IP を持つ）
   - [ ] **Home** → VirtualBox で代用。ネットワークは「ブリッジアダプター」
+- [ ] Windows の**スリープ / 休止を無効化**する
 - [ ] Ubuntu Server LTS を VM にインストール（GUI なし / CPU 2 / RAM 4GB / Disk 32GB）
 - [ ] ルータの DHCP で、VM の MAC アドレスに固定 IP を予約する
-- [ ] SSH 鍵でログインできるようにする（パスワード認証は切る）
+- [ ] **Mac から** SSH 鍵でログインできるようにする（鍵は Mac 側に持つ。パスワード認証は切る）
+- [ ] Mac の `~/.ssh/config` に `Host homelab` を書く（IP を覚えない）
 
 ### Done
 
@@ -106,13 +130,15 @@
 
 ### 学ぶこと
 
-仮想化とは何か（ハイパーバイザ Type-1 / Type-2）、NAT とブリッジの違い（＝ルータから見て VM が居るか）、SSH 公開鍵認証、`systemd` の起動シーケンス（`systemd-analyze blame`）。
+仮想化とは何か（ハイパーバイザ Type-1 / Type-2）、NAT とブリッジの違い（＝ルータから見て VM が居るか）、SSH 公開鍵認証（**秘密鍵はネットワークに流れない**）、`systemd` の起動シーケンス（`systemd-analyze blame`）、エージェントレスの意味（Ansible は SSH でコマンドを流し込むだけで、相手に常駐プロセスを置かない）。
 
 ---
 
 ## Phase 1 — すべてを Ansible に落とす（無料）
 
 **目的**: Phase 0 の手作業を、**コマンド 1 発で再現できる状態**にする。
+
+> 実行はすべて **Mac から**（→ Phase 0「マシンの役割分担」）。VM には Ansible を入れない。
 
 ### やること
 
