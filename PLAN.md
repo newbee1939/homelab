@@ -124,6 +124,18 @@
 - [ ] **Tailscale** を入れ、外出先から Pi-hole 管理画面に入れるようにする（Personal は無料）
 - [ ] GitHub Actions で `ansible-lint` と `--check`（dry-run）を回す
 
+### Phase 2 でそのまま流用するための書き方（今やっておく）
+
+**ここで書いたものは 9 割そのままミニ PC で動く。** 引っかかるのは決め打ちした箇所だけなので、最初から避ける。
+
+- [ ] **IP・ホスト名を playbook に直書きしない** → `inventory.yml` に隔離する。移行が 1 行の書き換えで済む
+- [ ] **ディスク名を `/dev/sda` と決め打ちしない** → ミニ PC は `/dev/nvme0n1`。`ansible_facts` から引く
+- [ ] **Docker は named volume を使う**（バインドマウントより移行が楽）
+
+> ⚠️ **playbook は「箱」しか作らない。** Pi-hole のブロックリスト、Kuma の監視履歴、Grafana のダッシュボードは
+> volume の中身であって、`ansible-playbook` を流しても**運ばれない**。移行は別作業（→ Phase 2 のバックアップ）。
+> この区別に気づかないまま Phase 2 に進むと、「同じ手順で作ったのに中身が空」で必ず一度ハマる。
+
 ### Done
 
 - [ ] VM を作り直し → `ansible-playbook site.yml` だけで元に戻せる
