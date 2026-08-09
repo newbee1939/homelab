@@ -114,9 +114,9 @@
 ### やること
 
 - [ ] **Mac に Ansible を入れる**（`brew install ansible`）
-- [ ] `winver` で Windows のエディションを確認する
+- [x] `winver` で Windows のエディションを確認する
   - [ ] **Pro / Enterprise** → Hyper-V を有効化。仮想スイッチは「外部」（VM が LAN 上に自分の IP を持つ）
-  - [ ] **Home** → VirtualBox で代用。ネットワークは「ブリッジアダプター」
+  - [x] **Home** → VirtualBox で代用。ネットワークは「ブリッジアダプター」
 - [ ] Windows の**スリープ / 休止を無効化**する
 - [ ] Ubuntu Server LTS を VM にインストール（GUI なし / CPU 2 / RAM 4GB / Disk 32GB）
 - [ ] ルータの DHCP で、VM の MAC アドレスに固定 IP を予約する
@@ -720,8 +720,8 @@ homelab/
 
 ## 最初の一歩（今日やること）
 
-- [ ] `winver` で Windows のエディションを確認する
-- [ ] Pro なら Hyper-V を有効化、Home なら VirtualBox を入れる
+- [x] `winver` で Windows のエディションを確認する
+- [x] Pro なら Hyper-V を有効化、Home なら VirtualBox を入れる
 - [ ] Ubuntu Server LTS の ISO を落とす
 
 ここまでで Phase 0 の半分が終わる。
